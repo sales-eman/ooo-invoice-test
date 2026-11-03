@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Eman Bakery - Realtime Odoo Sync</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; padding: 40px; max-width: 800px; margin: auto; background: #f3f4f6; }
+        .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 20px;}
+        select, input, button { width: 100%; padding: 12px; margin: 10px 0; border-radius: 6px; border: 1px solid #ccc; font-size: 16px; box-sizing: border-box;}
+        button { background-color: #2563eb; color: white; border: none; font-weight: bold; cursor: pointer; transition: 0.2s; }
+        button:hover { background-color: #1d4ed8; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        #log { font-family: monospace; background: #1f2937; color: #10b981; padding: 15px; border-radius: 6px; height: 400px; overflow-y: auto; font-size: 13px; line-height: 1.5; }
+        .status-pending { color: #f59e0b; }
+        .status-success { color: #10b981; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+    <div class="card">
+        <h2>Simulate High-Traffic Field Sales</h2>
+        <div class="grid">
+            <div>
+                <label>Select Customer:</label>
+                <select id="customerSelect">
+                    <option value="11">Test Cafe Alpha</option>
+                    <option value="12">Test Mart Beta</option>
+                    <option value="13">Test Roastery Gamma</option>
+                    <option value="14">Test Grocer Delta</option>
+                </select>
+            </div>
+            <div>
+                <label>Select Product:</label>
+                <select id="productSelect">
+                    <option value="1">Shami Kubus (83g) - Packet</option>
+                    <option value="2">Sliced White Bread - Packet</option>
+                    <option value="3">Sliced Brown Bread - Packet</option>
+                    <option value="4">Burger Buns (6 pcs) - Packet</option>
+                </select>
+            </div>
+        </div>
+        <label>Quantity per salesman:</label>
+        <input type="number" id="qtyInput" value="50">
+
+        <button onclick="runConcurrencyTest()">FIRE 15 ORDERS AT ONCE</button>
+    </div>
+
+    <div id="log">System Ready. Awaiting test execution...</div>
+
+    <script>
+        // --- INSERT YOUR PUBLIC SUPABASE CREDENTIALS HERE ---
+        const SUPABASE_URL = 'https://wbdfqaokadlkauupnymj.supabase.co';
+        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndiZGZxYW9rYWRsa2F1dXBueW1qIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTM3MjU4OTUsImV4cCI6MjEwOTMwMTg5NX0.MlL5QqEsb4IIcX7gp2Xeoo1hbsWjqTCrtKoLrzYZcGM';
+        
+        function logMessage(msg) {
+            const logBox = document.getElementById('log');
+            logBox.innerHTML += `<div>${msg}</div>`;
+            logBox.scrollTop = logBox.scrollHeight;
+        }
+
+        // Poll Supabase until the Edge Function updates the row
+        async function waitForOdooInvoice(supabaseRowId, salesmanNum) {
+            let attempts = 0;
+            const maxAttempts = 15; // Stop checking after 30 seconds
+
+            const interval = setInterval(async () => {
+                attempts++;
+                try {
+                    const response = await fetch(`${SUPABASE_URL}/rest/v1/mobile_invoice_queue?id=eq.${supabaseRowId}&select=status,odoo_invoice_id`, {
+                        method: 'GET',
+                        headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` }
+                    });
+                    
+                    const data = await response.json();
+                    if (data && data.length > 0) {
+                        const row = data[0];
+                        if (row.status === 'success') {
+                            logMessage(`<span class="status-success">[Salesman ${salesmanNum}] RETURNED: Invoice generated in Odoo! (Odoo ID: #${row.odoo_invoice_id})</span>`);
+                            clearInterval(interval);
+                        } else if (row.status === 'error') {
+                            logMessage(`[Salesman ${salesmanNum}] ERROR: Odoo rejected the creation.`);
+                            clearInterval(interval);
+                        }
+                    }
+                } catch (err) {
+                    console.error("Polling error", err);
+                }
+
+                if (attempts >= maxAttempts) {
+                    logMessage(`[Salesman ${salesmanNum}] TIMEOUT: Supabase queued it, but Edge Function is taking too long.`);
+                    clearInterval(interval);
+                }
+            }, 2000); // Check every 2 seconds
+        }
+        
+        // Send the initial request to Supabase
+        async function sendOrder(customerId, productId, quantity, salesmanNum) {
+            try {
+                const response = await fetch(`${SUPABASE_URL}/rest/v1/mobile_invoice_queue`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'apikey': SUPABASE_ANON_KEY,
+                        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+                        'Prefer': 'return=representation' // Forces Supabase to return the generated UUID
+                    },
+                    body: JSON.stringify({
+                        customer_id: customerId,
+                        product_id: productId,
+                        quantity: quantity
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok && data.length > 0) {
+                    const supabaseRowId = data[0].id;
+                    logMessage(`<span class="status-pending">[Salesman ${salesmanNum}] SENT: Order placed in queue. Waiting for Odoo...</span>`);
+                    
+                    // Start listening for the Odoo response
+                    waitForOdooInvoice(supabaseRowId, salesmanNum);
+                }
+            } catch (err) {
+                logMessage(`[Salesman ${salesmanNum}] FAILED to reach Supabase: ${err.message}`);
+            }
+        }
+
+        function runConcurrencyTest() {
+            const customerId = document.getElementById('customerSelect').value;
+            const productId = document.getElementById('productSelect').value;
+            const qty = document.getElementById('qtyInput').value;
+            
+            document.getElementById('log').innerHTML = 'Commencing test... firing 15 requests instantly.<br><br>';
+            
+            for (let i = 1; i <= 15; i++) {
+                sendOrder(parseInt(customerId), parseInt(productId), parseInt(qty), i);
+            }
+        }
+    </script>
+</body>
+</html>
