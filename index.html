@@ -13,21 +13,22 @@
         #log { font-family: monospace; background: #1f2937; color: #10b981; padding: 15px; border-radius: 6px; height: 500px; overflow-y: auto; font-size: 13px; line-height: 1.5; }
         .status-pending { color: #f59e0b; }
         .status-success { color: #10b981; font-weight: bold; }
+        .status-error { color: #ef4444; }
     </style>
 </head>
 <body>
 
     <div class="card">
-        <h2>Diagnostic Test</h2>
+        <h2>Simulate High-Traffic Field Sales</h2>
         <label>Quantity per salesman:</label>
         <input type="number" id="qtyInput" value="50">
-        <button onclick="runConcurrencyTest()">FIRE 15 ORDERS AT ONCE</button>
+        <button onclick="runConcurrencyTest()">FIRE 15 ORDERS</button>
     </div>
 
     <div id="log">System Ready. Awaiting test execution...</div>
 
     <script>
-        // --- INSERT YOUR PUBLIC SUPABASE CREDENTIALS HERE ---
+        // --- 1. INSERT YOUR PUBLIC SUPABASE CREDENTIALS HERE ---
         const SUPABASE_URL = 'https://wbdfqaokadlkauupnymj.supabase.co';
         const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndiZGZxYW9rYWRsa2F1dXBueW1qIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTM3MjU4OTUsImV4cCI6MjEwOTMwMTg5NX0.MlL5QqEsb4IIcX7gp2Xeoo1hbsWjqTCrtKoLrzYZcGM';
         
@@ -56,15 +57,14 @@
                             logMessage(`<span class="status-success">[Salesman ${salesmanNum}] SUCCESS! Odoo ID: #${row.odoo_invoice_id}</span>`);
                             clearInterval(interval);
                         } else if (row.status.startsWith('error')) {
-                            // THIS WILL PRINT THE EXACT ODOO DATABASE REJECTION REASON
-                            logMessage(`<span style="color:#ef4444">[Salesman ${salesmanNum}] ODOO ERROR: ${row.status}</span>`);
+                            logMessage(`<span class="status-error">[Salesman ${salesmanNum}] ODOO ERROR: ${row.status}</span>`);
                             clearInterval(interval);
                         }
                     }
                 } catch (err) {}
 
                 if (attempts >= 15) {
-                    logMessage(`<span style="color:#f59e0b">[Salesman ${salesmanNum}] TIMEOUT</span>`);
+                    logMessage(`<span class="status-error">[Salesman ${salesmanNum}] TIMEOUT: Took too long.</span>`);
                     clearInterval(interval);
                 }
             }, 2000); 
@@ -83,27 +83,38 @@
                     body: JSON.stringify({ customer_id: customerId, product_id: productId, quantity: quantity })
                 });
                 
-                if (!response.ok) return;
+                if (!response.ok) {
+                    logMessage(`<span class="status-error">[Salesman ${salesmanNum}] SUPABASE REJECTED POST.</span>`);
+                    return;
+                }
 
                 const data = await response.json();
                 if (data && data.length > 0) {
-                    logMessage(`<span class="status-pending">[Salesman ${salesmanNum}] SENT...</span>`);
+                    logMessage(`<span class="status-pending">[Salesman ${salesmanNum}] SENT... Waiting for Odoo...</span>`);
                     waitForOdooInvoice(data[0].id, salesmanNum);
                 }
-            } catch (err) { }
+            } catch (err) { 
+                logMessage(`<span class="status-error">[Salesman ${salesmanNum}] NETWORK ERROR.</span>`);
+            }
         }
 
+        // --- 2. THE STAGGERED TRAFFIC CONTROLLER ---
         function runConcurrencyTest() {
             const customerIds = [11, 12, 13, 14, 15, 16, 17, 18, 19, 20];
             const productIds = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
             const qty = document.getElementById('qtyInput').value;
             
-            document.getElementById('log').innerHTML = 'Firing 15 requests...<br><br>';
+            document.getElementById('log').innerHTML = 'Commencing staggered test... sending orders sequentially to prevent Odoo sequence locks.<br><br>';
             
             for (let i = 1; i <= 15; i++) {
                 const randomCustomer = customerIds[Math.floor(Math.random() * customerIds.length)];
                 const randomProduct = productIds[Math.floor(Math.random() * productIds.length)];
-                sendOrder(randomCustomer, randomProduct, parseInt(qty), i);
+                
+                // Spaces each request exactly 1.2 seconds apart
+                setTimeout(() => {
+                    logMessage(`<em>* Assigning Customer ID ${randomCustomer} to Salesman ${i}...</em>`);
+                    sendOrder(randomCustomer, randomProduct, parseInt(qty), i);
+                }, i * 1200); 
             }
         }
     </script>
