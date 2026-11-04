@@ -53,8 +53,10 @@
                     const data = await response.json();
                     if (data && data.length > 0) {
                         const row = data[0];
-                        if (row.status === 'success') {
-                            logMessage(`<span class="status-success">[Salesman ${salesmanNum}] SUCCESS! Odoo ID: #${row.odoo_invoice_id}</span>`);
+                        if (row.status.startsWith('success:')) {
+                            // This extracts the "INV/2026/XXXX" part and displays it
+                            const invoiceName = row.status.replace('success: ', '');
+                            logMessage(`<span class="status-success">[Salesman ${salesmanNum}] ZATCA POSTED! Invoice: ${invoiceName}</span>`);
                             clearInterval(interval);
                         } else if (row.status.startsWith('error')) {
                             logMessage(`<span class="status-error">[Salesman ${salesmanNum}] ODOO ERROR: ${row.status}</span>`);
