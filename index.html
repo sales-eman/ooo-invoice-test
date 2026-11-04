@@ -127,16 +127,25 @@
         }
 
         function runConcurrencyTest() {
-            const customerId = document.getElementById('customerSelect').value;
-            const productId = document.getElementById('productSelect').value;
-            const qty = document.getElementById('qtyInput').value;
-            
-            document.getElementById('log').innerHTML = 'Commencing test... firing 15 requests instantly.<br><br>';
-            
-            for (let i = 1; i <= 15; i++) {
-                sendOrder(parseInt(customerId), parseInt(productId), parseInt(qty), i);
-            }
-        }
+    // Your exact Odoo Internal IDs for the 10 Customers and 10 Products
+    const customerIds = [11, 12, 13, 14, 15, 16, 17, 18, 19, 20];
+    const productIds = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    const qty = document.getElementById('qtyInput').value;
+    
+    document.getElementById('log').innerHTML = 'Commencing test... firing 15 requests across different customers instantly.<br><br>';
+    
+    for (let i = 1; i <= 15; i++) {
+        // Automatically pick a random customer and product for each of the 15 salesmen
+        const randomCustomer = customerIds[Math.floor(Math.random() * customerIds.length)];
+        const randomProduct = productIds[Math.floor(Math.random() * productIds.length)];
+        
+        // Log who got assigned what just so you can see it on the screen
+        logMessage(`<em>* Assigning Customer ID ${randomCustomer} to Salesman ${i}...</em>`);
+        
+        // Fire the order
+        sendOrder(randomCustomer, randomProduct, parseInt(qty), i);
+    }
+}
     </script>
 </body>
 </html>
