@@ -49,85 +49,97 @@
     <div id="log">System Ready. Awaiting test execution...</div>
 
     <script>
-        // --- INSERT YOUR PUBLIC SUPABASE CREDENTIALS HERE ---
-        const SUPABASE_URL = 'https://wbdfqaokadlkauupnymj.supabase.co';
-        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndiZGZxYW9rYWRsa2F1dXBueW1qIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTM3MjU4OTUsImV4cCI6MjEwOTMwMTg5NX0.MlL5QqEsb4IIcX7gp2Xeoo1hbsWjqTCrtKoLrzYZcGM';
-        
-        function logMessage(msg) {
-            const logBox = document.getElementById('log');
-            logBox.innerHTML += `<div>${msg}</div>`;
-            logBox.scrollTop = logBox.scrollHeight;
-        }
+       // --- INSERT YOUR PUBLIC SUPABASE CREDENTIALS HERE ---
+const SUPABASE_URL = 'https://YOUR_PROJECT_ID.supabase.co';
+const SUPABASE_ANON_KEY = 'YOUR_ANON_KEY';
 
-        // Poll Supabase until the Edge Function updates the row
-        async function waitForOdooInvoice(supabaseRowId, salesmanNum) {
-            let attempts = 0;
-            const maxAttempts = 15; // Stop checking after 30 seconds
+function logMessage(msg) {
+    const logBox = document.getElementById('log');
+    logBox.innerHTML += `<div>${msg}</div>`;
+    logBox.scrollTop = logBox.scrollHeight;
+}
 
-            const interval = setInterval(async () => {
-                attempts++;
-                try {
-                    const response = await fetch(`${SUPABASE_URL}/rest/v1/mobile_invoice_queue?id=eq.${supabaseRowId}&select=status,odoo_invoice_id`, {
-                        method: 'GET',
-                        headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` }
-                    });
-                    
-                    const data = await response.json();
-                    if (data && data.length > 0) {
-                        const row = data[0];
-                        if (row.status === 'success') {
-                            logMessage(`<span class="status-success">[Salesman ${salesmanNum}] RETURNED: Invoice generated in Odoo! (Odoo ID: #${row.odoo_invoice_id})</span>`);
-                            clearInterval(interval);
-                        } else if (row.status === 'error') {
-                            logMessage(`[Salesman ${salesmanNum}] ERROR: Odoo rejected the creation.`);
-                            clearInterval(interval);
-                        }
-                    }
-                } catch (err) {
-                    console.error("Polling error", err);
-                }
+// Poll Supabase until the Edge Function updates the row
+async function waitForOdooInvoice(supabaseRowId, salesmanNum) {
+    let attempts = 0;
+    const maxAttempts = 15; // Stop checking after 30 seconds
 
-                if (attempts >= maxAttempts) {
-                    logMessage(`[Salesman ${salesmanNum}] TIMEOUT: Supabase queued it, but Edge Function is taking too long.`);
+    const interval = setInterval(async () => {
+        attempts++;
+        try {
+            const response = await fetch(`${SUPABASE_URL}/rest/v1/mobile_invoice_queue?id=eq.${supabaseRowId}&select=status,odoo_invoice_id`, {
+                method: 'GET',
+                headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${SUPABASE_ANON_KEY}` }
+            });
+            
+            if (!response.ok) {
+                const errText = await response.text();
+                logMessage(`<span style="color:#ef4444">[Salesman ${salesmanNum}] POLLING ERROR: ${response.status} - ${errText}</span>`);
+                clearInterval(interval);
+                return;
+            }
+
+            const data = await response.json();
+            if (data && data.length > 0) {
+                const row = data[0];
+                if (row.status === 'success') {
+                    logMessage(`<span class="status-success">[Salesman ${salesmanNum}] RETURNED: Invoice generated in Odoo! (Odoo ID: #${row.odoo_invoice_id})</span>`);
+                    clearInterval(interval);
+                } else if (row.status === 'error') {
+                    logMessage(`<span style="color:#ef4444">[Salesman ${salesmanNum}] ODOO REJECTED IT: Check Edge Function Logs.</span>`);
                     clearInterval(interval);
                 }
-            }, 2000); // Check every 2 seconds
-        }
-        
-        // Send the initial request to Supabase
-        async function sendOrder(customerId, productId, quantity, salesmanNum) {
-            try {
-                const response = await fetch(`${SUPABASE_URL}/rest/v1/mobile_invoice_queue`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'apikey': SUPABASE_ANON_KEY,
-                        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-                        'Prefer': 'return=representation' // Forces Supabase to return the generated UUID
-                    },
-                    body: JSON.stringify({
-                        customer_id: customerId,
-                        product_id: productId,
-                        quantity: quantity
-                    })
-                });
-                
-                const data = await response.json();
-                
-                if (response.ok && data.length > 0) {
-                    const supabaseRowId = data[0].id;
-                    logMessage(`<span class="status-pending">[Salesman ${salesmanNum}] SENT: Order placed in queue. Waiting for Odoo...</span>`);
-                    
-                    // Start listening for the Odoo response
-                    waitForOdooInvoice(supabaseRowId, salesmanNum);
-                }
-            } catch (err) {
-                logMessage(`[Salesman ${salesmanNum}] FAILED to reach Supabase: ${err.message}`);
             }
+        } catch (err) {
+            console.error("Polling error", err);
         }
 
-        function runConcurrencyTest() {
-    // Your exact Odoo Internal IDs for the 10 Customers and 10 Products
+        if (attempts >= maxAttempts) {
+            logMessage(`<span style="color:#f59e0b">[Salesman ${salesmanNum}] TIMEOUT: Supabase queued it, but Edge Function took too long.</span>`);
+            clearInterval(interval);
+        }
+    }, 2000); // Check every 2 seconds
+}
+
+// Send the initial request to Supabase
+async function sendOrder(customerId, productId, quantity, salesmanNum) {
+    try {
+        const response = await fetch(`${SUPABASE_URL}/rest/v1/mobile_invoice_queue`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'apikey': SUPABASE_ANON_KEY,
+                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+                'Prefer': 'return=representation' // Forces Supabase to return the generated UUID
+            },
+            body: JSON.stringify({
+                customer_id: customerId,
+                product_id: productId,
+                quantity: quantity
+            })
+        });
+        
+        if (!response.ok) {
+            const errText = await response.text();
+            logMessage(`<span style="color:#ef4444">[Salesman ${salesmanNum}] SUPABASE REJECTED POST: ${response.status} - ${errText}</span>`);
+            return;
+        }
+
+        const data = await response.json();
+        
+        if (data && data.length > 0) {
+            const supabaseRowId = data[0].id;
+            logMessage(`<span class="status-pending">[Salesman ${salesmanNum}] SENT: Order placed in queue. Waiting for Odoo...</span>`);
+            waitForOdooInvoice(supabaseRowId, salesmanNum);
+        } else {
+             logMessage(`<span style="color:#ef4444">[Salesman ${salesmanNum}] ERROR: Inserted, but Supabase blocked reading the ID.</span>`);
+        }
+    } catch (err) {
+        logMessage(`<span style="color:#ef4444">[Salesman ${salesmanNum}] NETWORK FAILED: ${err.message}</span>`);
+    }
+}
+
+function runConcurrencyTest() {
     const customerIds = [11, 12, 13, 14, 15, 16, 17, 18, 19, 20];
     const productIds = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
     const qty = document.getElementById('qtyInput').value;
@@ -135,14 +147,10 @@
     document.getElementById('log').innerHTML = 'Commencing test... firing 15 requests across different customers instantly.<br><br>';
     
     for (let i = 1; i <= 15; i++) {
-        // Automatically pick a random customer and product for each of the 15 salesmen
         const randomCustomer = customerIds[Math.floor(Math.random() * customerIds.length)];
         const randomProduct = productIds[Math.floor(Math.random() * productIds.length)];
         
-        // Log who got assigned what just so you can see it on the screen
         logMessage(`<em>* Assigning Customer ID ${randomCustomer} to Salesman ${i}...</em>`);
-        
-        // Fire the order
         sendOrder(randomCustomer, randomProduct, parseInt(qty), i);
     }
 }
